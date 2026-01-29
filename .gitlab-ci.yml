@@ -1,0 +1,53 @@
+variables:
+  AWS_REGION: "us-east-1"
+  ECR_REGISTRY: "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+  CLIENT_IMAGE: "${ECR_REGISTRY}/nexus-lms-client"
+  SERVER_IMAGE: "${ECR_REGISTRY}/nexus-lms-server"
+
+stages:
+  - build
+  - infrastructure
+  - deploy
+
+.docker-setup: &docker-setup
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  before_script:
+    - apk add --no-cache aws-cli
+    - aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+
+build-client:
+  stage: build
+  <<: *docker-setup
+  script:
+    - docker build --build-arg VITE_RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID} -t ${CLIENT_IMAGE}:latest ./client
+    - docker push ${CLIENT_IMAGE}:latest
+
+build-server:
+  stage: build
+  <<: *docker-setup
+  script:
+    - docker build -t ${SERVER_IMAGE}:latest ./server
+    - docker push ${SERVER_IMAGE}:latest
+
+terraform-apply:
+  stage: infrastructure
+  image: hashicorp/terraform:light
+  script:
+    - cd terraform
+    - terraform init
+    - terraform apply -auto-approve -var="db_password=${DB_PASSWORD}"
+  only:
+    - main
+
+deploy-to-eks:
+  stage: deploy
+  image: alpine/k8s:1.29.0
+  script:
+    - aws eks update-kubeconfig --region ${AWS_REGION} --name nexus-lms-cluster
+    - sed -i "s|<AWS_ACCOUNT_ID>|${AWS_ACCOUNT_ID}|g" k8s/*.yaml
+    - sed -i "s|<REGION>|${AWS_REGION}|g" k8s/*.yaml
+    - kubectl apply -f k8s/
+  only:
+    - main

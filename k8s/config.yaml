@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexus-config
+data:
+  PORT: "3000"
+  NODE_ENV: "production"
+  CLOUDINARY_CLOUD_NAME: "dxveuhbda"
+  ZF_URL: "http://<LOAD_BALANCER_DNS>" # Update after deployment
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nexus-secrets
+type: Opaque
+data:
+  # Values must be Base64 encoded.
+  # Example: echo -n "value" | base64
+  DATABASE_URL: <BASE64_DATABASE_URL>
+  JWT_SECRET: <BASE64_JWT_SECRET>
+  JWT_REFRESH_SECRET: <BASE64_JWT_REFRESH_SECRET>
+  CLOUDINARY_API_KEY: <BASE64_CLOUDINARY_API_KEY>
+  CLOUDINARY_API_SECRET: <BASE64_CLOUDINARY_API_SECRET>
+  RAZORPAY_KEY_ID: <BASE64_RAZORPAY_KEY_ID>
+  RAZORPAY_KEY_SECRET: <BASE64_RAZORPAY_KEY_SECRET>
