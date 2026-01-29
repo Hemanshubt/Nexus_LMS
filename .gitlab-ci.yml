@@ -8,6 +8,7 @@ stages:
   - build
   - infrastructure
   - deploy
+  - sync
 
 .docker-setup: &docker-setup
   image: docker:24.0.5
@@ -51,3 +52,5 @@ deploy-to-eks:
     - kubectl apply -f k8s/
   only:
     - main
+
+
