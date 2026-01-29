@@ -1,0 +1,10 @@
+# ================================
+# Kubernetes Namespace
+# ================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nexus-lms
+  labels:
+    app.kubernetes.io/name: nexus-lms
+    app.kubernetes.io/managed-by: terraform

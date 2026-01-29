@@ -1,18 +1,63 @@
-﻿node_modules/
-.env
-.env.*
+# ================================
+# Nexus LMS - Git Ignore
+# ================================
+
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build outputs
 dist/
 build/
-.terraform/
-*.tfstate
-*.tfstate.*
-.terraform.lock.hcl
-.vscode/
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
 .idea/
+.vscode/
 *.swp
+*.swo
+*~
+
+# OS files
 .DS_Store
 Thumbs.db
+
+# Logs
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-kubeconfig
+
+# Testing
+coverage/
+.nyc_output/
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfplan
+terraform/.terraform.lock.hcl
+*.tfvars
+!*.tfvars.example
+
+# Kubernetes
+k8s/secrets.yaml
+
+# Docker
+*.tar
+
+# Temporary files
+tmp/
+temp/
+.cache/
+
+# Debug
+.debug/

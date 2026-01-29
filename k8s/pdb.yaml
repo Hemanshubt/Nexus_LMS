@@ -1,0 +1,27 @@
+# ================================
+# Pod Disruption Budget
+# Ensure high availability during cluster operations
+# ================================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nexus-lms-server-pdb
+  namespace: nexus-lms
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nexus-lms
+      app.kubernetes.io/component: server
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nexus-lms-client-pdb
+  namespace: nexus-lms
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nexus-lms
+      app.kubernetes.io/component: client
