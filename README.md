@@ -1,15 +1,4 @@
-<p align="center">
-  <img src="https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript"/>
-  <img src="https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React"/>
-  <img src="https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white" alt="Node.js"/>
-  <img src="https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL"/>
-  <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker"/>
-  <img src="https://img.shields.io/badge/Kubernetes-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white" alt="Kubernetes"/>
-  <img src="https://img.shields.io/badge/Terraform-7B42BC?style=for-the-badge&logo=terraform&logoColor=white" alt="Terraform"/>
-  <img src="https://img.shields.io/badge/AWS-232F3E?style=for-the-badge&logo=amazonaws&logoColor=white" alt="AWS"/>
-</p>
-
-# 🎓 Nexus LMS Platform
+# Nexus LMS Platform
 
 A **production-grade Learning Management System (LMS)** SaaS platform built with specific focus on scalability, clean architecture, and modern tech stack. Fully containerized with enterprise-grade DevOps infrastructure.
 
@@ -81,28 +70,23 @@ A **production-grade Learning Management System (LMS)** SaaS platform built with
 
 ## 🏗 Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                               AWS Cloud                                      │
-│  ┌─────────────────────────────────────────────────────────────────────────┐│
-│  │                            VPC (10.0.0.0/16)                            ││
-│  │  ┌─────────────────────────────────────────────────────────────────────┐││
-│  │  │                    EKS Cluster (Kubernetes)                         │││
-│  │  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │││
-│  │  │  │  nexus-client    │  │  nexus-server    │  │  AWS ALB         │  │││
-│  │  │  │  (React/Nginx)   │  │  (Node/Express)  │  │  (Ingress)       │  │││
-│  │  │  │  Replicas: 2-10  │  │  Replicas: 2-20  │  │  SSL/TLS         │  │││
-│  │  │  └──────────────────┘  └──────────────────┘  └──────────────────┘  │││
-│  │  └─────────────────────────────────────────────────────────────────────┘││
-│  │                                    │                                     ││
-│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────┐   ││
-│  │  │   Amazon ECR     │  │   Amazon RDS     │  │   AWS Secrets Mgr   │   ││
-│  │  │   (Container     │  │   (PostgreSQL)   │  │   (Credentials)     │   ││
-│  │  │    Registry)     │  │   Multi-AZ       │  │                     │   ││
-│  │  └──────────────────┘  └──────────────────┘  └──────────────────────┘   ││
-│  └─────────────────────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/Architecture.png" alt="Nexus LMS Architecture" width="800"/>
+</p>
+
+### Infrastructure Overview
+
+| Component | AWS Service | Purpose |
+|-----------|-------------|---------|
+| **CDN** | CloudFront | Content delivery & caching |
+| **DNS** | Route 53 | Domain management |
+| **Load Balancer** | ALB | Traffic distribution |
+| **Compute** | EKS (Kubernetes) | Container orchestration |
+| **Database** | RDS PostgreSQL | Managed database |
+| **Registry** | ECR | Docker image storage |
+| **Secrets** | Secrets Manager | Credential storage |
+| **Storage** | S3 | Static assets & backups |
+| **Monitoring** | CloudWatch | Logs & metrics |
 
 ---
 
