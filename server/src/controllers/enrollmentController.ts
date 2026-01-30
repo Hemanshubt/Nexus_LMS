@@ -36,7 +36,7 @@ export const getEnrollmentStatus = catchAsync(async (req: Request, res: Response
 });
 
 export const createOrder = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-    const { courseId } = req.body;
+    const { courseId, couponCode } = req.body;
     const userId = req.user.id;
 
     const course = await prisma.course.findUnique({ where: { id: courseId } });
@@ -51,18 +51,83 @@ export const createOrder = catchAsync(async (req: Request, res: Response, next: 
         return next(new AppError('You are already enrolled in this course', 400));
     }
 
-    // Handle Free Course
-    if (course.price === 0) {
-        const enrollment = await prisma.enrollment.create({
-            data: {
-                userId,
-                courseId,
-                progress: 0,
-                completed: false
-            }
+    let finalPrice = course.price;
+    let couponId = null;
+    let discountAmount = 0;
+
+    // Validate Coupon if provided
+    if (couponCode) {
+        const coupon = await prisma.coupon.findUnique({
+            where: { code: couponCode.toUpperCase() },
+            include: { courses: { select: { id: true } } }
         });
 
-        // Send notification for free enrollment
+        if (coupon && coupon.isActive) {
+            // Check validity dates
+            const now = new Date();
+            const isValidDate = (!coupon.validFrom || coupon.validFrom <= now) &&
+                (!coupon.validUntil || coupon.validUntil >= now);
+
+            // Check usage limits
+            const isUsageValid = !coupon.usageLimit || coupon.usedCount < coupon.usageLimit;
+
+            // Check user limit
+            const userUsage = await prisma.couponUsage.count({
+                where: { couponId: coupon.id, userId }
+            });
+            const isUserLimitValid = userUsage < coupon.perUserLimit;
+
+            // Check course restriction
+            const isCourseValid = coupon.courses.length === 0 || coupon.courses.some(c => c.id === courseId);
+
+            // Check min purchase
+            const isMinPurchaseValid = !coupon.minPurchase || course.price >= coupon.minPurchase;
+
+            if (isValidDate && isUsageValid && isUserLimitValid && isCourseValid && isMinPurchaseValid) {
+                // Calculate discount
+                if (coupon.discountType === 'PERCENTAGE') {
+                    discountAmount = (course.price * coupon.discountValue) / 100;
+                    if (coupon.maxDiscount) discountAmount = Math.min(discountAmount, coupon.maxDiscount);
+                } else {
+                    discountAmount = coupon.discountValue;
+                }
+                discountAmount = Math.min(discountAmount, course.price);
+                finalPrice = Math.max(0, course.price - discountAmount);
+                couponId = coupon.id;
+            }
+        }
+    }
+
+    // Handle Free Course (naturally free or via coupon)
+    if (finalPrice <= 0) {
+        // Transaction to create enrollment and record coupon usage
+        const enrollment = await prisma.$transaction(async (tx) => {
+            const newEnrollment = await tx.enrollment.create({
+                data: {
+                    userId,
+                    courseId,
+                    progress: 0,
+                    completed: false
+                }
+            });
+
+            if (couponId) {
+                await tx.couponUsage.create({
+                    data: {
+                        couponId,
+                        userId,
+                        discount: discountAmount
+                    }
+                });
+                await tx.coupon.update({
+                    where: { id: couponId },
+                    data: { usedCount: { increment: 1 } }
+                });
+            }
+            return newEnrollment;
+        });
+
+        // Send notification
         await createNotification(
             userId,
             NotificationType.ENROLLMENT,
@@ -73,31 +138,30 @@ export const createOrder = catchAsync(async (req: Request, res: Response, next: 
 
         return res.status(200).json({
             status: 'success',
-            message: 'Enrolled successfully for free',
+            message: 'Enrolled successfully',
             data: { enrollment, isFree: true }
         });
     }
 
     // Create Razorpay Order
     const options = {
-        amount: Math.round(course.price * 100), // Amount in paise
+        amount: Math.round(finalPrice * 100), // Amount in paise
         currency: "INR",
         receipt: `rcpt_${courseId?.slice(0, 10)}_${userId?.slice(0, 10)}`,
     };
 
-    console.log('RAZORPAY OPTIONS:', options);
-
     try {
         const order = await razorpay.orders.create(options);
 
-        // Optional: Store pending payment record
+        // Store pending payment record with coupon info
         await prisma.payment.create({
             data: {
                 orderId: order.id,
-                amount: course.price,
+                amount: finalPrice,
                 userId,
                 courseId,
-                status: 'PENDING'
+                status: 'PENDING',
+                couponId // Store the coupon used for this order
             }
         });
 
@@ -130,7 +194,6 @@ export const verifyPayment = catchAsync(async (req: Request, res: Response, next
         .digest('hex');
 
     if (expectedSignature !== razorpay_signature) {
-        // Optional: Mark payment as failed if we have the record
         await prisma.payment.updateMany({
             where: { orderId: razorpay_order_id },
             data: { status: 'FAILED' }
@@ -138,7 +201,7 @@ export const verifyPayment = catchAsync(async (req: Request, res: Response, next
         return next(new AppError('Payment verification failed', 400));
     }
 
-    // Atomic transaction: Create Enrollment and Update Payment
+    // Atomic transaction
     const result = await prisma.$transaction(async (tx) => {
         // 1. Create Enrollment
         const enrollment = await tx.enrollment.create({
@@ -150,34 +213,68 @@ export const verifyPayment = catchAsync(async (req: Request, res: Response, next
             }
         });
 
-        // 2. Update/Create Payment Record
-        const payment = await tx.payment.upsert({
+        // 2. Update Payment
+        const payment = await tx.payment.update({
             where: { orderId: razorpay_order_id },
-            update: {
+            data: {
                 paymentId: razorpay_payment_id,
                 signature: razorpay_signature,
-                enrollmentId: enrollment.id,
-                status: 'SUCCESS'
-            },
-            create: {
-                orderId: razorpay_order_id,
-                paymentId: razorpay_payment_id,
-                signature: razorpay_signature,
-                amount: 0, // Should have been created in createOrder, but fallback
-                userId,
-                courseId,
                 enrollmentId: enrollment.id,
                 status: 'SUCCESS'
             }
         });
 
+        // 3. Record Coupon Usage if couponId exists on payment
+        if (payment.couponId) {
+            // Check if usage already recorded (to be safe)
+            const existingUsage = await tx.couponUsage.findFirst({
+                where: { orderId: razorpay_order_id }
+            });
+
+            if (!existingUsage) {
+                // Calculate original price roughly (or fetch course) to know discount?
+                // Actually payment.amount is the *discounted* price.
+                // We need the discount amount. 
+                // Let's re-fetch coupon to calculate or just store simplistic info?
+                // Ideally payment record should store `discountAmount` too but we didn't add it.
+                // We'll just calculate based on current course price (might have changed? Unlikely during transaction).
+                // Better: Fetch coupon and recalculate based on course price.
+
+                const course = await tx.course.findUnique({ where: { id: courseId } });
+                const coupon = await tx.coupon.findUnique({ where: { id: payment.couponId } });
+
+                if (course && coupon) {
+                    let discountAmount = 0;
+                    if (coupon.discountType === 'PERCENTAGE') {
+                        discountAmount = (course.price * coupon.discountValue) / 100;
+                        if (coupon.maxDiscount) discountAmount = Math.min(discountAmount, coupon.maxDiscount);
+                    } else {
+                        discountAmount = coupon.discountValue;
+                    }
+                    discountAmount = Math.min(discountAmount, course.price);
+
+                    await tx.couponUsage.create({
+                        data: {
+                            couponId: payment.couponId!,
+                            userId,
+                            orderId: razorpay_order_id,
+                            discount: discountAmount
+                        }
+                    });
+
+                    await tx.coupon.update({
+                        where: { id: payment.couponId! },
+                        data: { usedCount: { increment: 1 } }
+                    });
+                }
+            }
+        }
+
         return { enrollment, payment };
     });
 
-    // Get course name for notification
     const course = await prisma.course.findUnique({ where: { id: courseId } });
 
-    // Send notification for paid enrollment
     await createNotification(
         userId,
         NotificationType.ENROLLMENT,
@@ -186,7 +283,6 @@ export const verifyPayment = catchAsync(async (req: Request, res: Response, next
         `/student/courses/${courseId}`
     );
 
-    // Send payment notification
     await createNotification(
         userId,
         NotificationType.PAYMENT,

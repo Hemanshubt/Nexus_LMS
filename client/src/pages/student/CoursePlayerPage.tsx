@@ -10,6 +10,8 @@ import AssignmentPlayer from "@/components/student/AssignmentPlayer";
 import CourseReviews from "@/components/course/CourseReviews";
 import LessonQA from "@/components/student/LessonQA";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import CouponInput from "@/components/common/CouponInput";
+import { CouponValidation } from "@/services/couponService";
 
 interface Lesson {
     id: string;
@@ -42,6 +44,7 @@ export default function CoursePlayerPage() {
     const [isEnrolled, setIsEnrolled] = useState(false);
     const [completedLessons, setCompletedLessons] = useState<string[]>([]);
     const [isBuying, setIsBuying] = useState(false);
+    const [appliedCoupon, setAppliedCoupon] = useState<CouponValidation | null>(null);
 
     useEffect(() => {
         if (courseId) {
@@ -107,11 +110,14 @@ export default function CoursePlayerPage() {
         }
 
         try {
-            const orderRes = await api.post('/enrollments/checkout', { courseId: course.id });
+            const orderRes = await api.post('/enrollments/checkout', {
+                courseId: course.id,
+                couponCode: appliedCoupon?.coupon.code
+            });
 
             if (orderRes.data.data.isFree) {
                 setIsEnrolled(true);
-                alert("You have been enrolled for free! Enjoy the course.");
+                alert("You have been enrolled successfully!");
                 return;
             }
 
@@ -169,19 +175,33 @@ export default function CoursePlayerPage() {
                     {/* Content Player Container */}
                     <div className="aspect-video bg-black rounded-2xl overflow-hidden flex items-center justify-center relative shadow-2xl border border-white/5">
                         {isLocked ? (
-                            <div className="absolute inset-0 z-10 bg-black/90 flex flex-col items-center justify-center text-center p-8 space-y-6 backdrop-blur-sm">
+                            <div className="absolute inset-0 z-10 bg-black/95 flex flex-col items-center justify-center text-center p-8 space-y-6 backdrop-blur-md">
                                 <div className="bg-primary/20 p-6 rounded-full animate-pulse">
                                     <Lock className="w-12 h-12 text-primary" />
                                 </div>
-                                <div className="space-y-2">
+                                <div className="space-y-2 max-w-md mx-auto">
                                     <h2 className="text-3xl font-bold text-white tracking-tight">Access Restricted</h2>
-                                    <p className="text-white/60 max-w-sm mx-auto leading-relaxed">
+                                    <p className="text-white/60 leading-relaxed">
                                         Unlock full lifetime access to this course and all future updates.
                                     </p>
                                 </div>
-                                <Button size="lg" onClick={handleBuyCourse} disabled={isBuying} className="h-14 px-10 text-lg font-bold">
-                                    {isBuying ? "Processing..." : `Enroll Now • $${course.price}`}
-                                </Button>
+
+                                <div className="w-full max-w-sm mx-auto space-y-4">
+                                    <CouponInput
+                                        courseId={course.id}
+                                        originalPrice={course.price}
+                                        onApply={setAppliedCoupon}
+                                        className="bg-white/5 p-4 rounded-xl border border-white/10"
+                                    />
+
+                                    <Button size="lg" onClick={handleBuyCourse} disabled={isBuying} className="w-full h-14 text-lg font-bold shadow-xl shadow-primary/20">
+                                        {isBuying ? "Processing..." : (
+                                            appliedCoupon
+                                                ? `Enroll Now • ₹${appliedCoupon.finalPrice}`
+                                                : `Enroll Now • ₹${course.price}`
+                                        )}
+                                    </Button>
+                                </div>
                             </div>
                         ) : (
                             activeLesson ? (
