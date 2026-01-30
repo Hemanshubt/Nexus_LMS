@@ -12,6 +12,7 @@ import CertificatePage from '@/pages/student/certificate/CertificatePage';
 import ProfilePage from '@/pages/ProfilePage';
 import AssignmentSubmissionsPage from '@/pages/instructor/AssignmentSubmissionsPage';
 import CourseDetailsPage from '@/pages/student/CourseDetailsPage';
+import WishlistPage from '@/pages/student/WishlistPage';
 
 import { useEffect } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -49,6 +50,8 @@ function App() {
 
                     {/* Student Routes */}
                     <Route path="dashboard" element={<ProtectedRoute allowedRoles={['STUDENT', 'ADMIN', 'INSTRUCTOR']}><StudentDashboard /></ProtectedRoute>} />
+                    <Route path="student/dashboard" element={<ProtectedRoute allowedRoles={['STUDENT', 'ADMIN', 'INSTRUCTOR']}><StudentDashboard /></ProtectedRoute>} />
+                    <Route path="student/wishlist" element={<ProtectedRoute allowedRoles={['STUDENT', 'ADMIN', 'INSTRUCTOR']}><WishlistPage /></ProtectedRoute>} />
                     <Route path="courses" element={<StudentDashboard />} />
                     <Route path="course/:courseId" element={<CourseDetailsPage />} />
                     <Route path="learn/:courseId" element={<ProtectedRoute allowedRoles={['STUDENT', 'ADMIN', 'INSTRUCTOR']}><CoursePlayerPage /></ProtectedRoute>} />

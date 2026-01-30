@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Loader2, PlayCircle, FileText, CheckCircle, Clock, Users, Globe, BookOpen, Star } from "lucide-react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import WishlistButton from "@/components/common/WishlistButton";
 
 interface Lesson {
     id: string;
@@ -144,7 +145,7 @@ export default function CourseDetailsPage() {
                                             <Button className="w-full py-6 text-lg" asChild>
                                                 <Link to={`/learn/${course.id}`}>Buy Now</Link>
                                             </Button>
-                                            <Button variant="outline" className="w-full py-6">Add to Cart</Button>
+                                            <WishlistButton courseId={course.id} variant="default" className="w-full py-6" />
                                         </>
                                     )}
                                 </div>
@@ -277,10 +278,13 @@ export default function CourseDetailsPage() {
 
                 {/* Mobile Buy Button Placeholder (Floating) */}
                 <div className="lg:hidden fixed bottom-0 left-0 right-0 p-4 bg-background border-t z-50 flex items-center justify-between shadow-lg">
-                    <div className="text-2xl font-bold">${course.price}</div>
-                    <Button size="lg" className="px-8" asChild>
-                        <Link to={`/learn/${course.id}`}>{isEnrolled ? "Go to Course" : "Buy Now"}</Link>
-                    </Button>
+                    <div className="text-2xl font-bold">₹{course.price}</div>
+                    <div className="flex items-center gap-2">
+                        {!isEnrolled && <WishlistButton courseId={course.id} variant="icon" />}
+                        <Button size="lg" className="px-8" asChild>
+                            <Link to={`/learn/${course.id}`}>{isEnrolled ? "Go to Course" : "Buy Now"}</Link>
+                        </Button>
+                    </div>
                 </div>
             </div>
         </div>

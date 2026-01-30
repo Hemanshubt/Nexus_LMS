@@ -2,6 +2,8 @@ import { Outlet, Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/useAuthStore';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import NotificationBell from '@/components/common/NotificationBell';
+import { Heart } from 'lucide-react';
 
 const Layout = () => {
     const { user, logout } = useAuthStore();
@@ -22,6 +24,9 @@ const Layout = () => {
                         </Link>
                         <nav className="flex items-center space-x-6 text-sm font-semibold">
                             <Link to="/courses" className="transition-colors hover:text-primary">Courses</Link>
+                            {user && (
+                                <Link to="/student/dashboard" className="transition-colors hover:text-primary">My Learning</Link>
+                            )}
                             {user && user.role === 'INSTRUCTOR' && (
                                 <Link to="/instructor/dashboard" className="transition-colors hover:text-primary">Instructor Panel</Link>
                             )}
@@ -31,10 +36,18 @@ const Layout = () => {
                         </nav>
                     </div>
                     <div className="flex flex-1 items-center justify-between space-x-2 md:justify-end">
-                        <nav className="flex items-center space-x-4">
+                        <nav className="flex items-center space-x-2">
                             {user ? (
                                 <>
-                                    <Link to="/profile" className="text-sm font-medium transition-colors hover:text-primary">
+                                    <Link
+                                        to="/student/wishlist"
+                                        className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground h-10 w-10"
+                                        title="My Wishlist"
+                                    >
+                                        <Heart className="h-5 w-5" />
+                                    </Link>
+                                    <NotificationBell />
+                                    <Link to="/profile" className="text-sm font-medium transition-colors hover:text-primary px-3">
                                         Profile
                                     </Link>
                                     <Button variant="ghost" size="sm" onClick={handleLogout}>
@@ -71,3 +84,4 @@ const Layout = () => {
 };
 
 export default Layout;
+
