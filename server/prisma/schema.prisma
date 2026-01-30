@@ -43,6 +43,8 @@ model User {
   submissions     AssignmentSubmission[]
   certificates    Certificate[]
   payments        Payment[]
+  notifications   Notification[]
+  wishlist        Wishlist[]
 }
 
 model Course {
@@ -64,6 +66,7 @@ model Course {
   categories  Category[] // M-to-N
   certificates Certificate[]
   payments    Payment[]
+  wishlist    Wishlist[]
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -239,5 +242,52 @@ model Certificate {
   course    Course   @relation(fields: [courseId], references: [id])
   issuedAt  DateTime @default(now())
 
+  @@unique([userId, courseId])
+}
+
+// ─────────────────────────────────────────
+// Notifications System
+// ─────────────────────────────────────────
+enum NotificationType {
+  ENROLLMENT
+  PAYMENT
+  COURSE_UPDATE
+  ASSIGNMENT_GRADED
+  QUIZ_RESULT
+  CERTIFICATE
+  ANNOUNCEMENT
+  COMMENT_REPLY
+  SYSTEM
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  type      NotificationType
+  title     String
+  message   String
+  link      String?  // Optional redirect URL
+  
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────
+// Wishlist (Save for Later)
+// ─────────────────────────────────────────
+model Wishlist {
+  id        String   @id @default(uuid())
+  userId    String
+  courseId  String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  
   @@unique([userId, courseId])
 }

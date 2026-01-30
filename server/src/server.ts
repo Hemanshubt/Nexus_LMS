@@ -31,6 +31,8 @@ import analyticsRouter from './routes/analyticsRoutes';
 import assignmentRouter from './routes/assignmentRoutes';
 import reviewRouter from './routes/reviewRoutes';
 import commentRouter from './routes/commentRoutes';
+import notificationRouter from './routes/notificationRoutes';
+import wishlistRouter from './routes/wishlistRoutes';
 
 const API_PREFIX = '/api/v1';
 
@@ -46,6 +48,8 @@ app.use(`${API_PREFIX}/analytics`, analyticsRouter);
 app.use(`${API_PREFIX}/assignments`, assignmentRouter);
 app.use(`${API_PREFIX}/reviews`, reviewRouter);
 app.use(`${API_PREFIX}/comments`, commentRouter);
+app.use(`${API_PREFIX}/notifications`, notificationRouter);
+app.use(`${API_PREFIX}/wishlist`, wishlistRouter);
 
 app.get('/health', (req: Request, res: Response) => {
     res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });

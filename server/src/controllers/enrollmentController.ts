@@ -1,9 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
 import { catchAsync } from '../utils/catchAsync';
 import { AppError } from '../utils/appError';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, NotificationType } from '@prisma/client';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
+import { createNotification } from './notificationController';
 
 const prisma = new PrismaClient();
 
@@ -60,6 +61,16 @@ export const createOrder = catchAsync(async (req: Request, res: Response, next: 
                 completed: false
             }
         });
+
+        // Send notification for free enrollment
+        await createNotification(
+            userId,
+            NotificationType.ENROLLMENT,
+            'Enrollment Successful!',
+            `You have successfully enrolled in "${course.title}". Start learning now!`,
+            `/student/courses/${courseId}`
+        );
+
         return res.status(200).json({
             status: 'success',
             message: 'Enrolled successfully for free',
@@ -162,6 +173,27 @@ export const verifyPayment = catchAsync(async (req: Request, res: Response, next
 
         return { enrollment, payment };
     });
+
+    // Get course name for notification
+    const course = await prisma.course.findUnique({ where: { id: courseId } });
+
+    // Send notification for paid enrollment
+    await createNotification(
+        userId,
+        NotificationType.ENROLLMENT,
+        'Enrollment Successful!',
+        `Payment confirmed! You are now enrolled in "${course?.title}". Start learning now!`,
+        `/student/courses/${courseId}`
+    );
+
+    // Send payment notification
+    await createNotification(
+        userId,
+        NotificationType.PAYMENT,
+        'Payment Received',
+        `Your payment of ₹${result.payment.amount} for "${course?.title}" was successful.`,
+        `/student/dashboard`
+    );
 
     res.status(201).json({
         status: 'success',
