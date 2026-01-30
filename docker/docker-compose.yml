@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  server:
+    build:
+      context: ../server
+      dockerfile: ../docker/Dockerfile.server
+    container_name: nexus-server
+    ports:
+      - "3000:3000"
+    env_file:
+      - ../server/.env
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/nexus_lms
+    depends_on:
+      - postgres
+    networks:
+      - nexus-network
+
+  client:
+    build:
+      context: ../client
+      dockerfile: ../docker/Dockerfile.client
+    container_name: nexus-client
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+    networks:
+      - nexus-network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: nexus-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: nexus_lms
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - nexus-network
+
+volumes:
+  postgres_data:
+
+networks:
+  nexus-network:
+    driver: bridge

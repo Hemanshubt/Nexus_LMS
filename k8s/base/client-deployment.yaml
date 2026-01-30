@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexus-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexus-client
+  template:
+    metadata:
+      labels:
+        app: nexus-client
+    spec:
+      containers:
+      - name: nexus-client
+        image: nexus-client
+        ports:
+        - containerPort: 80
+        resources:
+          limits:
+            memory: "256Mi"
+            cpu: "250m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexus-client
+spec:
+  selector:
+    app: nexus-client
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+  type: ClusterIP
