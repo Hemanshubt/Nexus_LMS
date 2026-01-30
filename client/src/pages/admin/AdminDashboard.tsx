@@ -9,8 +9,10 @@ import {
     MoreHorizontal,
     UserPlus,
     LayoutDashboard,
-    TrendingUp
+    TrendingUp,
+    Ticket
 } from "lucide-react";
+import { CouponsTab } from "./CouponsTab";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -165,6 +167,7 @@ export default function AdminDashboard() {
                 <TabsList className="bg-muted/50 p-1">
                     <TabsTrigger value="users" className="gap-2"><Users className="w-4 h-4" /> Users</TabsTrigger>
                     <TabsTrigger value="courses" className="gap-2"><BookOpen className="w-4 h-4" /> Courses</TabsTrigger>
+                    <TabsTrigger value="coupons" className="gap-2"><Ticket className="w-4 h-4" /> Coupons</TabsTrigger>
                     <TabsTrigger value="settings" className="gap-2"><LayoutDashboard className="w-4 h-4" /> Parameters</TabsTrigger>
                 </TabsList>
 
@@ -276,6 +279,10 @@ export default function AdminDashboard() {
                             </TableBody>
                         </Table>
                     </Card>
+                </TabsContent>
+
+                <TabsContent value="coupons" className="space-y-4">
+                    <CouponsTab courses={courses} />
                 </TabsContent>
             </Tabs>
         </div>

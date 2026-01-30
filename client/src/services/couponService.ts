@@ -7,6 +7,14 @@ export interface Coupon {
     discountType: 'PERCENTAGE' | 'FIXED';
     discountValue: number;
     maxDiscount?: number;
+    minPurchase?: number;
+    usageLimit?: number;
+    usedCount: number;
+    perUserLimit: number;
+    validFrom?: string;
+    validUntil?: string;
+    isActive: boolean;
+    courses?: { id: string; title: string }[];
 }
 
 export interface CouponValidation {
