@@ -1,23 +1,24 @@
-import { Request, Response, NextFunction } from 'express';
-import { catchAsync } from '../utils/catchAsync';
-import { AppError } from '../utils/appError';
-import { PrismaClient, NotificationType } from '@prisma/client';
-import Razorpay from 'razorpay';
-import crypto from 'crypto';
-import { createNotification } from './notificationController';
-import sendEmail from '../utils/sendEmail';
-
-const prisma = new PrismaClient();
-
-const razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID!,
-    key_secret: process.env.RAZORPAY_KEY_SECRET!,
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getMyEnrollments = exports.verifyPayment = exports.createOrder = exports.getEnrollmentStatus = void 0;
+const catchAsync_1 = require("../utils/catchAsync");
+const appError_1 = require("../utils/appError");
+const client_1 = require("@prisma/client");
+const razorpay_1 = __importDefault(require("razorpay"));
+const crypto_1 = __importDefault(require("crypto"));
+const notificationController_1 = require("./notificationController");
+const sendEmail_1 = __importDefault(require("../utils/sendEmail"));
+const prisma = new client_1.PrismaClient();
+const razorpay = new razorpay_1.default({
+    key_id: process.env.RAZORPAY_KEY_ID,
+    key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
-
-export const getEnrollmentStatus = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+exports.getEnrollmentStatus = (0, catchAsync_1.catchAsync)(async (req, res, next) => {
     const { courseId } = req.params;
     const userId = req.user.id;
-
     const enrollment = await prisma.enrollment.findUnique({
         where: {
             userId_courseId: {
@@ -26,7 +27,6 @@ export const getEnrollmentStatus = catchAsync(async (req: Request, res: Response
             }
         }
     });
-
     res.status(200).json({
         status: 'success',
         data: {
@@ -35,61 +35,52 @@ export const getEnrollmentStatus = catchAsync(async (req: Request, res: Response
         }
     });
 });
-
-export const createOrder = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+exports.createOrder = (0, catchAsync_1.catchAsync)(async (req, res, next) => {
     const { courseId, couponCode } = req.body;
     const userId = req.user.id;
-
     const course = await prisma.course.findUnique({ where: { id: courseId } });
-    if (!course) return next(new AppError('Course not found', 404));
-
+    if (!course)
+        return next(new appError_1.AppError('Course not found', 404));
     // Check if already enrolled
     const existingEnrollment = await prisma.enrollment.findUnique({
         where: { userId_courseId: { userId, courseId } }
     });
-
     if (existingEnrollment) {
-        return next(new AppError('You are already enrolled in this course', 400));
+        return next(new appError_1.AppError('You are already enrolled in this course', 400));
     }
-
     let finalPrice = course.price;
     let couponId = null;
     let discountAmount = 0;
-
     // Validate Coupon if provided
     if (couponCode) {
         const coupon = await prisma.coupon.findUnique({
             where: { code: couponCode.toUpperCase() },
             include: { courses: { select: { id: true } } }
         });
-
         if (coupon && coupon.isActive) {
             // Check validity dates
             const now = new Date();
             const isValidDate = (!coupon.validFrom || coupon.validFrom <= now) &&
                 (!coupon.validUntil || coupon.validUntil >= now);
-
             // Check usage limits
             const isUsageValid = !coupon.usageLimit || coupon.usedCount < coupon.usageLimit;
-
             // Check user limit
             const userUsage = await prisma.couponUsage.count({
                 where: { couponId: coupon.id, userId }
             });
             const isUserLimitValid = userUsage < coupon.perUserLimit;
-
             // Check course restriction
             const isCourseValid = coupon.courses.length === 0 || coupon.courses.some(c => c.id === courseId);
-
             // Check min purchase
             const isMinPurchaseValid = !coupon.minPurchase || course.price >= coupon.minPurchase;
-
             if (isValidDate && isUsageValid && isUserLimitValid && isCourseValid && isMinPurchaseValid) {
                 // Calculate discount
                 if (coupon.discountType === 'PERCENTAGE') {
                     discountAmount = (course.price * coupon.discountValue) / 100;
-                    if (coupon.maxDiscount) discountAmount = Math.min(discountAmount, coupon.maxDiscount);
-                } else {
+                    if (coupon.maxDiscount)
+                        discountAmount = Math.min(discountAmount, coupon.maxDiscount);
+                }
+                else {
                     discountAmount = coupon.discountValue;
                 }
                 discountAmount = Math.min(discountAmount, course.price);
@@ -98,7 +89,6 @@ export const createOrder = catchAsync(async (req: Request, res: Response, next: 
             }
         }
     }
-
     // Handle Free Course (naturally free or via coupon)
     if (finalPrice <= 0) {
         // Transaction to create enrollment and record coupon usage
@@ -111,7 +101,6 @@ export const createOrder = catchAsync(async (req: Request, res: Response, next: 
                     completed: false
                 }
             });
-
             if (couponId) {
                 await tx.couponUsage.create({
                     data: {
@@ -127,19 +116,11 @@ export const createOrder = catchAsync(async (req: Request, res: Response, next: 
             }
             return newEnrollment;
         });
-
         // Send notification
-        await createNotification(
-            userId,
-            NotificationType.ENROLLMENT,
-            'Enrollment Successful!',
-            `You have successfully enrolled in "${course.title}". Start learning now!`,
-            `/student/courses/${courseId}`
-        );
-
+        await (0, notificationController_1.createNotification)(userId, client_1.NotificationType.ENROLLMENT, 'Enrollment Successful!', `You have successfully enrolled in "${course.title}". Start learning now!`, `/student/courses/${courseId}`);
         // Send Email
         try {
-            await sendEmail({
+            await (0, sendEmail_1.default)({
                 email: req.user.email,
                 subject: 'Enrollment Successful',
                 message: `You have successfully enrolled in "${course.title}". Start learning now!`,
@@ -154,27 +135,24 @@ export const createOrder = catchAsync(async (req: Request, res: Response, next: 
                     </div>
                 `
             });
-        } catch (err) {
+        }
+        catch (err) {
             console.error('Email send failed', err);
         }
-
         return res.status(200).json({
             status: 'success',
             message: 'Enrolled successfully',
             data: { enrollment, isFree: true }
         });
     }
-
     // Create Razorpay Order
     const options = {
         amount: Math.round(finalPrice * 100), // Amount in paise
         currency: "INR",
         receipt: `rcpt_${courseId?.slice(0, 10)}_${userId?.slice(0, 10)}`,
     };
-
     try {
         const order = await razorpay.orders.create(options);
-
         // Store pending payment record with coupon info
         await prisma.payment.create({
             data: {
@@ -186,43 +164,34 @@ export const createOrder = catchAsync(async (req: Request, res: Response, next: 
                 couponId // Store the coupon used for this order
             }
         });
-
         res.status(200).json({
             status: 'success',
             data: {
                 order
             }
         });
-    } catch (error) {
+    }
+    catch (error) {
         console.error('RAZORPAY ERROR:', error);
-        return next(new AppError('Failed to create payment order', 500));
+        return next(new appError_1.AppError('Failed to create payment order', 500));
     }
 });
-
-export const verifyPayment = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-    const {
-        courseId,
-        razorpay_order_id,
-        razorpay_payment_id,
-        razorpay_signature
-    } = req.body;
+exports.verifyPayment = (0, catchAsync_1.catchAsync)(async (req, res, next) => {
+    const { courseId, razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
     const userId = req.user.id;
-
     // Verify Signature
     const body = razorpay_order_id + "|" + razorpay_payment_id;
-    const expectedSignature = crypto
-        .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET!)
+    const expectedSignature = crypto_1.default
+        .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
         .update(body.toString())
         .digest('hex');
-
     if (expectedSignature !== razorpay_signature) {
         await prisma.payment.updateMany({
             where: { orderId: razorpay_order_id },
             data: { status: 'FAILED' }
         });
-        return next(new AppError('Payment verification failed', 400));
+        return next(new appError_1.AppError('Payment verification failed', 400));
     }
-
     // Atomic transaction
     const result = await prisma.$transaction(async (tx) => {
         // 1. Create Enrollment
@@ -234,7 +203,6 @@ export const verifyPayment = catchAsync(async (req: Request, res: Response, next
                 completed: false
             }
         });
-
         // 2. Update Payment
         const payment = await tx.payment.update({
             where: { orderId: razorpay_order_id },
@@ -245,14 +213,12 @@ export const verifyPayment = catchAsync(async (req: Request, res: Response, next
                 status: 'SUCCESS'
             }
         });
-
         // 3. Record Coupon Usage if couponId exists on payment
         if (payment.couponId) {
             // Check if usage already recorded (to be safe)
             const existingUsage = await tx.couponUsage.findFirst({
                 where: { orderId: razorpay_order_id }
             });
-
             if (!existingUsage) {
                 // Calculate original price roughly (or fetch course) to know discount?
                 // Actually payment.amount is the *discounted* price.
@@ -261,61 +227,42 @@ export const verifyPayment = catchAsync(async (req: Request, res: Response, next
                 // Ideally payment record should store `discountAmount` too but we didn't add it.
                 // We'll just calculate based on current course price (might have changed? Unlikely during transaction).
                 // Better: Fetch coupon and recalculate based on course price.
-
                 const course = await tx.course.findUnique({ where: { id: courseId } });
                 const coupon = await tx.coupon.findUnique({ where: { id: payment.couponId } });
-
                 if (course && coupon) {
                     let discountAmount = 0;
                     if (coupon.discountType === 'PERCENTAGE') {
                         discountAmount = (course.price * coupon.discountValue) / 100;
-                        if (coupon.maxDiscount) discountAmount = Math.min(discountAmount, coupon.maxDiscount);
-                    } else {
+                        if (coupon.maxDiscount)
+                            discountAmount = Math.min(discountAmount, coupon.maxDiscount);
+                    }
+                    else {
                         discountAmount = coupon.discountValue;
                     }
                     discountAmount = Math.min(discountAmount, course.price);
-
                     await tx.couponUsage.create({
                         data: {
-                            couponId: payment.couponId!,
+                            couponId: payment.couponId,
                             userId,
                             orderId: razorpay_order_id,
                             discount: discountAmount
                         }
                     });
-
                     await tx.coupon.update({
-                        where: { id: payment.couponId! },
+                        where: { id: payment.couponId },
                         data: { usedCount: { increment: 1 } }
                     });
                 }
             }
         }
-
         return { enrollment, payment };
     });
-
     const course = await prisma.course.findUnique({ where: { id: courseId } });
-
-    await createNotification(
-        userId,
-        NotificationType.ENROLLMENT,
-        'Enrollment Successful!',
-        `Payment confirmed! You are now enrolled in "${course?.title}". Start learning now!`,
-        `/student/courses/${courseId}`
-    );
-
-    await createNotification(
-        userId,
-        NotificationType.PAYMENT,
-        'Payment Received',
-        `Your payment of ₹${result.payment.amount} for "${course?.title}" was successful.`,
-        `/student/dashboard`
-    );
-
+    await (0, notificationController_1.createNotification)(userId, client_1.NotificationType.ENROLLMENT, 'Enrollment Successful!', `Payment confirmed! You are now enrolled in "${course?.title}". Start learning now!`, `/student/courses/${courseId}`);
+    await (0, notificationController_1.createNotification)(userId, client_1.NotificationType.PAYMENT, 'Payment Received', `Your payment of ₹${result.payment.amount} for "${course?.title}" was successful.`, `/student/dashboard`);
     // Send Email
     try {
-        await sendEmail({
+        await (0, sendEmail_1.default)({
             email: req.user.email,
             subject: 'Payment Receipt & Enrollment Confirmation',
             message: `Your payment for "${course?.title}" was successful. You are now enrolled!`,
@@ -331,10 +278,10 @@ export const verifyPayment = catchAsync(async (req: Request, res: Response, next
                 </div>
             `
         });
-    } catch (err) {
+    }
+    catch (err) {
         console.error('Email send failed', err);
     }
-
     res.status(201).json({
         status: 'success',
         data: {
@@ -343,10 +290,8 @@ export const verifyPayment = catchAsync(async (req: Request, res: Response, next
         }
     });
 });
-
-export const getMyEnrollments = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+exports.getMyEnrollments = (0, catchAsync_1.catchAsync)(async (req, res, next) => {
     const userId = req.user.id;
-
     const enrollments = await prisma.enrollment.findMany({
         where: {
             userId
@@ -375,7 +320,6 @@ export const getMyEnrollments = catchAsync(async (req: Request, res: Response, n
             }
         }
     });
-
     res.status(200).json({
         status: 'success',
         results: enrollments.length,
