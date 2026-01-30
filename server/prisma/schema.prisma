@@ -67,6 +67,7 @@ model Course {
   certificates Certificate[]
   payments    Payment[]
   wishlist    Wishlist[]
+  coupons     Coupon[]   @relation("CouponCourses")
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -291,3 +292,59 @@ model Wishlist {
   
   @@unique([userId, courseId])
 }
+
+// ─────────────────────────────────────────
+// Coupon System
+// ─────────────────────────────────────────
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+model Coupon {
+  id              String       @id @default(uuid())
+  code            String       @unique
+  description     String?
+  
+  discountType    DiscountType @default(PERCENTAGE)
+  discountValue   Float        // Percentage (0-100) or fixed amount
+  
+  minPurchase     Float?       // Minimum course price to apply
+  maxDiscount     Float?       // Maximum discount cap for percentage
+  
+  usageLimit      Int?         // Total times coupon can be used
+  usedCount       Int          @default(0)
+  perUserLimit    Int          @default(1) // Times per user
+  
+  validFrom       DateTime     @default(now())
+  validUntil      DateTime?    // Null = never expires
+  
+  isActive        Boolean      @default(true)
+  
+  // Optional: Restrict to specific courses
+  courses         Course[]     @relation("CouponCourses")
+  
+  // Track usage
+  usages          CouponUsage[]
+  
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  
+  @@index([code])
+  @@index([isActive, validUntil])
+}
+
+model CouponUsage {
+  id        String   @id @default(uuid())
+  couponId  String
+  userId    String
+  orderId   String?  // Razorpay order ID
+  discount  Float    // Actual discount applied
+  
+  coupon    Coupon   @relation(fields: [couponId], references: [id])
+  
+  createdAt DateTime @default(now())
+  
+  @@index([couponId, userId])
+}
+

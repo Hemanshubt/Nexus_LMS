@@ -33,6 +33,7 @@ import reviewRouter from './routes/reviewRoutes';
 import commentRouter from './routes/commentRoutes';
 import notificationRouter from './routes/notificationRoutes';
 import wishlistRouter from './routes/wishlistRoutes';
+import couponRouter from './routes/couponRoutes';
 
 const API_PREFIX = '/api/v1';
 
@@ -50,6 +51,7 @@ app.use(`${API_PREFIX}/reviews`, reviewRouter);
 app.use(`${API_PREFIX}/comments`, commentRouter);
 app.use(`${API_PREFIX}/notifications`, notificationRouter);
 app.use(`${API_PREFIX}/wishlist`, wishlistRouter);
+app.use(`${API_PREFIX}/coupons`, couponRouter);
 
 app.get('/health', (req: Request, res: Response) => {
     res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });

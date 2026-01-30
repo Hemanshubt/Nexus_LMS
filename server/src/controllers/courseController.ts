@@ -6,7 +6,18 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 export const getAllCourses = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-    const { search, category, all } = req.query;
+    const {
+        search,
+        category,
+        all,
+        minPrice,
+        maxPrice,
+        sort = 'newest',
+        page = 1,
+        limit = 12,
+        level,
+        free
+    } = req.query;
 
     const where: any = {};
 
@@ -18,6 +29,7 @@ export const getAllCourses = catchAsync(async (req: Request, res: Response, next
         where.published = true;
     }
 
+    // Search filter
     if (search) {
         where.OR = [
             { title: { contains: search as string, mode: 'insensitive' } },
@@ -25,6 +37,7 @@ export const getAllCourses = catchAsync(async (req: Request, res: Response, next
         ];
     }
 
+    // Category filter
     if (category && category !== 'All') {
         where.categories = {
             some: {
@@ -33,21 +46,64 @@ export const getAllCourses = catchAsync(async (req: Request, res: Response, next
         };
     }
 
-    const courses = await prisma.course.findMany({
-        where,
-        include: {
-            instructor: {
-                select: { name: true, avatar: true }
-            },
-            reviews: {
-                select: { rating: true }
-            },
-            categories: true
-        },
-        orderBy: { createdAt: 'desc' }
-    });
+    // Price filters
+    if (free === 'true') {
+        where.price = 0;
+    } else {
+        if (minPrice || maxPrice) {
+            where.price = {};
+            if (minPrice) where.price.gte = parseFloat(minPrice as string);
+            if (maxPrice) where.price.lte = parseFloat(maxPrice as string);
+        }
+    }
 
-    const coursesWithRating = courses.map(course => {
+    // Sorting options
+    let orderBy: any = { createdAt: 'desc' }; // default: newest
+    switch (sort) {
+        case 'oldest':
+            orderBy = { createdAt: 'asc' };
+            break;
+        case 'price-low':
+            orderBy = { price: 'asc' };
+            break;
+        case 'price-high':
+            orderBy = { price: 'desc' };
+            break;
+        case 'popular':
+            orderBy = { enrollments: { _count: 'desc' } };
+            break;
+        case 'rating':
+            // Will sort in JS after fetching
+            break;
+    }
+
+    // Pagination
+    const skip = (Number(page) - 1) * Number(limit);
+    const take = Number(limit);
+
+    const [courses, total] = await Promise.all([
+        prisma.course.findMany({
+            where,
+            include: {
+                instructor: {
+                    select: { name: true, avatar: true }
+                },
+                reviews: {
+                    select: { rating: true }
+                },
+                categories: true,
+                _count: {
+                    select: { enrollments: true }
+                }
+            },
+            orderBy,
+            skip,
+            take
+        }),
+        prisma.course.count({ where })
+    ]);
+
+    let coursesWithRating = courses.map(course => {
         const totalReviews = course.reviews.length;
         const avgRating = totalReviews > 0
             ? course.reviews.reduce((acc, r) => acc + r.rating, 0) / totalReviews
@@ -57,15 +113,27 @@ export const getAllCourses = catchAsync(async (req: Request, res: Response, next
         return {
             ...courseData,
             avgRating,
-            totalReviews
+            totalReviews,
+            enrollmentCount: course._count.enrollments
         }
     });
 
+    // Sort by rating if requested
+    if (sort === 'rating') {
+        coursesWithRating = coursesWithRating.sort((a, b) => b.avgRating - a.avgRating);
+    }
+
     res.status(200).json({
         status: 'success',
-        results: courses.length,
+        results: coursesWithRating.length,
         data: {
-            courses: coursesWithRating
+            courses: coursesWithRating,
+            pagination: {
+                page: Number(page),
+                limit: Number(limit),
+                total,
+                pages: Math.ceil(total / Number(limit))
+            }
         }
     });
 });
