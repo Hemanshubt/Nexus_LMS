@@ -1,460 +1,396 @@
-# ================================
+# ============================================
 # Nexus LMS - GitLab CI/CD Pipeline
-# Complete DevOps Pipeline with Docker, K8s, Terraform, AWS
-# ================================
+# Complete CI/CD with Docker, K8s, and AWS
+# ============================================
 
 stages:
   - validate
   - test
-  - security
   - build
-  - deploy-infrastructure
+  - security
+  - deploy-dev
   - deploy-staging
-  - deploy-production
+  - deploy-prod
 
-# ================================
+# ─────────────────────────────────────────
 # Global Variables
-# ================================
+# ─────────────────────────────────────────
 variables:
   # Docker configuration
-  DOCKER_DRIVER: overlay2
+  DOCKER_HOST: tcp://docker:2376
   DOCKER_TLS_CERTDIR: "/certs"
+  DOCKER_TLS_VERIFY: 1
+  DOCKER_CERT_PATH: "$DOCKER_TLS_CERTDIR/client"
   
-  # AWS Configuration
-  AWS_REGION: ap-south-1
-  AWS_ACCOUNT_ID: ${AWS_ACCOUNT_ID}
+  # AWS Configuration (set in GitLab CI/CD settings)
+  AWS_DEFAULT_REGION: ap-south-1
   
-  # ECR Repositories
-  ECR_SERVER_REPO: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/nexus-lms-server
-  ECR_CLIENT_REPO: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/nexus-lms-client
+  # Application
+  CLIENT_IMAGE: nexus-client
+  SERVER_IMAGE: nexus-server
   
-  # EKS Cluster
-  EKS_CLUSTER_NAME: nexus-lms-eks-prod
-  
-  # Kubernetes namespace
-  K8S_NAMESPACE: nexus-lms
-  
-  # Terraform version
-  TF_VERSION: "1.6.6"
+  # Kubernetes
+  KUBE_NAMESPACE_DEV: nexus-lms-dev
+  KUBE_NAMESPACE_STAGING: nexus-lms-staging
+  KUBE_NAMESPACE_PROD: nexus-lms-prod
 
-# ================================
+# ─────────────────────────────────────────
 # Default Configuration
-# ================================
+# ─────────────────────────────────────────
 default:
-  image: alpine:latest
-  tags:
-    - docker
-  retry:
-    max: 2
-    when:
-      - runner_system_failure
-      - stuck_or_timeout_failure
+  image: docker:24
+  services:
+    - docker:24-dind
+  before_script:
+    - apk add --no-cache curl bash aws-cli kubectl git
 
-# ================================
+# ─────────────────────────────────────────
 # Cache Configuration
-# ================================
+# ─────────────────────────────────────────
 .node_cache: &node_cache
   cache:
     key: ${CI_COMMIT_REF_SLUG}
     paths:
+      - node_modules/
       - client/node_modules/
       - server/node_modules/
     policy: pull-push
 
-# ================================
-# Templates
-# ================================
-.aws_auth: &aws_auth
-  before_script:
-    - apk add --no-cache aws-cli curl jq
-    - aws --version
-    # Use OIDC authentication with AWS
-    - >
-      export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/web_identity_token
-    - echo "${CI_JOB_JWT_V2}" > $AWS_WEB_IDENTITY_TOKEN_FILE
-    - export AWS_ROLE_ARN="${AWS_ROLE_ARN}"
-    - aws sts get-caller-identity
-
-.docker_build: &docker_build
-  image: docker:24-dind
-  services:
-    - docker:24-dind
-  <<: *aws_auth
-
-.kubectl_setup: &kubectl_setup
-  before_script:
-    - apk add --no-cache aws-cli curl
-    - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-    - chmod +x kubectl && mv kubectl /usr/local/bin/
-    - aws eks update-kubeconfig --name ${EKS_CLUSTER_NAME} --region ${AWS_REGION}
-
-# ================================
+# ─────────────────────────────────────────
 # STAGE: Validate
-# ================================
-validate:lint:client:
+# ─────────────────────────────────────────
+lint:
   stage: validate
   image: node:20-alpine
   <<: *node_cache
   script:
-    - cd client
-    - npm ci --prefer-offline
-    - npm run lint
+    - npm ci
+    - npm run lint --workspaces --if-present
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
 
-validate:typecheck:client:
+typecheck:
   stage: validate
   image: node:20-alpine
   <<: *node_cache
   script:
-    - cd client
-    - npm ci --prefer-offline
-    - npx tsc --noEmit
+    - npm ci
+    - npm run typecheck --workspaces --if-present
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
 
-validate:typecheck:server:
+terraform-validate:
   stage: validate
-  image: node:20-alpine
-  <<: *node_cache
-  script:
-    - cd server
-    - npm ci --prefer-offline
-    - npx tsc --noEmit
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "develop"
-
-validate:terraform:
-  stage: validate
-  image: hashicorp/terraform:${TF_VERSION}
+  image: hashicorp/terraform:1.6
   script:
     - cd terraform
     - terraform init -backend=false
     - terraform validate
     - terraform fmt -check -recursive
   rules:
-    - changes:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
         - terraform/**/*
-    - if: $CI_COMMIT_BRANCH == "main"
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - terraform/**/*
 
-# ================================
+# ─────────────────────────────────────────
 # STAGE: Test
-# ================================
-test:server:
+# ─────────────────────────────────────────
+test-server:
   stage: test
   image: node:20-alpine
   <<: *node_cache
   services:
-    - postgres:16-alpine
-    - redis:7-alpine
+    - name: postgres:16-alpine
+      alias: postgres
   variables:
-    POSTGRES_DB: test_db
-    POSTGRES_USER: test_user
-    POSTGRES_PASSWORD: test_password
-    DATABASE_URL: postgresql://test_user:test_password@postgres:5432/test_db
-    REDIS_URL: redis://redis:6379
-    JWT_SECRET: test-jwt-secret
+    POSTGRES_USER: test
+    POSTGRES_PASSWORD: test
+    POSTGRES_DB: nexus_test
+    DATABASE_URL: postgresql://test:test@postgres:5432/nexus_test
   script:
+    - npm ci
     - cd server
-    - npm ci --prefer-offline
     - npx prisma generate
     - npx prisma db push
-    - npm test -- --coverage
+    - npm test
   coverage: '/All files[^|]*\|[^|]*\s+([\d\.]+)/'
   artifacts:
     reports:
+      junit: server/coverage/junit.xml
       coverage_report:
         coverage_format: cobertura
         path: server/coverage/cobertura-coverage.xml
-    paths:
-      - server/coverage/
-    expire_in: 1 week
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
 
-test:client:
+test-client:
   stage: test
   image: node:20-alpine
   <<: *node_cache
   script:
+    - npm ci
     - cd client
-    - npm ci --prefer-offline
-    - npm test -- --coverage --watchAll=false
+    - npm test -- --run --coverage
   coverage: '/All files[^|]*\|[^|]*\s+([\d\.]+)/'
   artifacts:
     reports:
       coverage_report:
         coverage_format: cobertura
         path: client/coverage/cobertura-coverage.xml
-    paths:
-      - client/coverage/
-    expire_in: 1 week
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
 
-# ================================
+# ─────────────────────────────────────────
+# STAGE: Build
+# ─────────────────────────────────────────
+.build_template: &build_template
+  stage: build
+  script:
+    # Login to ECR
+    - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+    
+    # Build and push with cache
+    - |
+      docker build \
+        --cache-from $ECR_REGISTRY/$IMAGE_NAME:latest \
+        --build-arg BUILDKIT_INLINE_CACHE=1 \
+        -t $ECR_REGISTRY/$IMAGE_NAME:$CI_COMMIT_SHA \
+        -t $ECR_REGISTRY/$IMAGE_NAME:$CI_COMMIT_REF_SLUG \
+        -t $ECR_REGISTRY/$IMAGE_NAME:latest \
+        -f docker/$DOCKERFILE .
+    
+    - docker push $ECR_REGISTRY/$IMAGE_NAME --all-tags
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+build-client:
+  <<: *build_template
+  variables:
+    IMAGE_NAME: $CLIENT_IMAGE
+    DOCKERFILE: Dockerfile.client
+
+build-server:
+  <<: *build_template
+  variables:
+    IMAGE_NAME: $SERVER_IMAGE
+    DOCKERFILE: Dockerfile.server
+
+# ─────────────────────────────────────────
 # STAGE: Security
-# ================================
-security:dependency-scan:
+# ─────────────────────────────────────────
+container-scan-client:
+  stage: security
+  image: aquasec/trivy:latest
+  script:
+    - trivy image --exit-code 1 --severity CRITICAL,HIGH $ECR_REGISTRY/$CLIENT_IMAGE:$CI_COMMIT_SHA
+  allow_failure: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+  needs:
+    - build-client
+
+container-scan-server:
+  stage: security
+  image: aquasec/trivy:latest
+  script:
+    - trivy image --exit-code 1 --severity CRITICAL,HIGH $ECR_REGISTRY/$SERVER_IMAGE:$CI_COMMIT_SHA
+  allow_failure: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+  needs:
+    - build-server
+
+sast:
   stage: security
   image: node:20-alpine
   script:
-    - cd client && npm audit --audit-level=high || true
-    - cd ../server && npm audit --audit-level=high || true
+    - npm ci
+    - npx snyk test --all-projects
   allow_failure: true
   rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
 
-security:container-scan:server:
-  stage: security
-  image: aquasec/trivy:latest
-  <<: *aws_auth
-  script:
-    - aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-    - trivy image --exit-code 1 --severity HIGH,CRITICAL ${ECR_SERVER_REPO}:${CI_COMMIT_SHA}
-  allow_failure: true
-  needs:
-    - build:server
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-
-security:sast:
-  stage: security
-  image: semgrep/semgrep:latest
-  script:
-    - semgrep scan --config auto --sarif --output semgrep.sarif .
-  artifacts:
-    reports:
-      sast: semgrep.sarif
-    paths:
-      - semgrep.sarif
-    expire_in: 1 week
-  allow_failure: true
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "develop"
-
-# ================================
-# STAGE: Build
-# ================================
-build:server:
-  stage: build
-  <<: *docker_build
-  script:
-    # Login to ECR
-    - aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-    
-    # Build and push
-    - cd server
-    - docker build 
-        --cache-from ${ECR_SERVER_REPO}:latest 
-        --build-arg BUILDKIT_INLINE_CACHE=1
-        -t ${ECR_SERVER_REPO}:${CI_COMMIT_SHA}
-        -t ${ECR_SERVER_REPO}:${CI_COMMIT_REF_SLUG}
-        -t ${ECR_SERVER_REPO}:latest
-        .
-    - docker push ${ECR_SERVER_REPO}:${CI_COMMIT_SHA}
-    - docker push ${ECR_SERVER_REPO}:${CI_COMMIT_REF_SLUG}
-    - docker push ${ECR_SERVER_REPO}:latest
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "develop"
-    - if: $CI_COMMIT_TAG
-
-build:client:
-  stage: build
-  <<: *docker_build
-  script:
-    # Login to ECR
-    - aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-    
-    # Build and push
-    - cd client
-    - docker build 
-        --cache-from ${ECR_CLIENT_REPO}:latest 
-        --build-arg BUILDKIT_INLINE_CACHE=1
-        --build-arg VITE_API_URL=${VITE_API_URL}
-        -t ${ECR_CLIENT_REPO}:${CI_COMMIT_SHA}
-        -t ${ECR_CLIENT_REPO}:${CI_COMMIT_REF_SLUG}
-        -t ${ECR_CLIENT_REPO}:latest
-        .
-    - docker push ${ECR_CLIENT_REPO}:${CI_COMMIT_SHA}
-    - docker push ${ECR_CLIENT_REPO}:${CI_COMMIT_REF_SLUG}
-    - docker push ${ECR_CLIENT_REPO}:latest
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "develop"
-    - if: $CI_COMMIT_TAG
-
-# ================================
-# STAGE: Deploy Infrastructure
-# ================================
-terraform:plan:
-  stage: deploy-infrastructure
-  image: hashicorp/terraform:${TF_VERSION}
-  <<: *aws_auth
-  script:
-    - cd terraform
-    - terraform init
-    - terraform plan -out=tfplan
-  artifacts:
-    paths:
-      - terraform/tfplan
-    expire_in: 1 day
-  rules:
-    - changes:
-        - terraform/**/*
-      when: manual
-    - if: $CI_COMMIT_BRANCH == "main"
-      when: manual
-
-terraform:apply:
-  stage: deploy-infrastructure
-  image: hashicorp/terraform:${TF_VERSION}
-  <<: *aws_auth
-  script:
-    - cd terraform
-    - terraform init
-    - terraform apply -auto-approve tfplan
-  needs:
-    - terraform:plan
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-      when: manual
+# ─────────────────────────────────────────
+# STAGE: Deploy Development
+# ─────────────────────────────────────────
+deploy-dev:
+  stage: deploy-dev
+  image: alpine/k8s:1.29.0
   environment:
-    name: infrastructure
-
-# ================================
-# STAGE: Deploy Staging
-# ================================
-deploy:staging:
-  stage: deploy-staging
-  image: alpine:latest
-  <<: *kubectl_setup
-  variables:
-    ENVIRONMENT: staging
-    K8S_NAMESPACE: nexus-lms-staging
+    name: development
+    url: https://dev.nexus-lms.com
   script:
-    # Update image tags in manifests
-    - export IMAGE_TAG=${CI_COMMIT_SHA}
+    # Configure kubectl
+    - aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_DEV
     
-    # Apply Kubernetes manifests
-    - kubectl apply -f k8s/namespace.yaml
-    - kubectl apply -f k8s/configmap.yaml
-    - kubectl apply -f k8s/secrets.yaml -n ${K8S_NAMESPACE}
-    - kubectl apply -f k8s/rbac.yaml
+    # Create namespace if not exists
+    - kubectl create namespace $KUBE_NAMESPACE_DEV --dry-run=client -o yaml | kubectl apply -f -
     
-    # Deploy with image substitution
+    # Apply secrets from AWS Secrets Manager
     - |
-      sed -e "s|\${AWS_ACCOUNT_ID}|${AWS_ACCOUNT_ID}|g" \
-          -e "s|\${AWS_REGION}|${AWS_REGION}|g" \
-          -e "s|:latest|:${IMAGE_TAG}|g" \
-          k8s/server-deployment.yaml | kubectl apply -f -
+      kubectl create secret generic nexus-secrets \
+        --namespace $KUBE_NAMESPACE_DEV \
+        --from-literal=DATABASE_URL="$(aws secretsmanager get-secret-value --secret-id nexus-lms-dev/app-secrets --query SecretString --output text | jq -r .DATABASE_URL)" \
+        --from-literal=JWT_SECRET="$(aws secretsmanager get-secret-value --secret-id nexus-lms-dev/app-secrets --query SecretString --output text | jq -r .JWT_SECRET)" \
+        --from-literal=JWT_REFRESH_SECRET="$(aws secretsmanager get-secret-value --secret-id nexus-lms-dev/app-secrets --query SecretString --output text | jq -r .JWT_REFRESH_SECRET)" \
+        --dry-run=client -o yaml | kubectl apply -f -
     
+    # Deploy using Kustomize
     - |
-      sed -e "s|\${AWS_ACCOUNT_ID}|${AWS_ACCOUNT_ID}|g" \
-          -e "s|\${AWS_REGION}|${AWS_REGION}|g" \
-          -e "s|:latest|:${IMAGE_TAG}|g" \
-          k8s/client-deployment.yaml | kubectl apply -f -
-    
-    - kubectl apply -f k8s/ingress.yaml
-    - kubectl apply -f k8s/network-policies.yaml
-    - kubectl apply -f k8s/pdb.yaml
+      cd k8s/overlays/dev
+      kustomize edit set image \
+        nexus-client=$ECR_REGISTRY/$CLIENT_IMAGE:$CI_COMMIT_SHA \
+        nexus-server=$ECR_REGISTRY/$SERVER_IMAGE:$CI_COMMIT_SHA
+      kustomize build . | kubectl apply -f -
     
     # Wait for rollout
-    - kubectl rollout status deployment/nexus-lms-server -n ${K8S_NAMESPACE} --timeout=300s
-    - kubectl rollout status deployment/nexus-lms-client -n ${K8S_NAMESPACE} --timeout=300s
+    - kubectl rollout status deployment/nexus-client-dev -n $KUBE_NAMESPACE_DEV --timeout=300s
+    - kubectl rollout status deployment/nexus-server-dev -n $KUBE_NAMESPACE_DEV --timeout=300s
+    
+    # Run database migrations
+    - |
+      kubectl run prisma-migrate-$CI_PIPELINE_ID \
+        --namespace $KUBE_NAMESPACE_DEV \
+        --image=$ECR_REGISTRY/$SERVER_IMAGE:$CI_COMMIT_SHA \
+        --restart=Never \
+        --rm \
+        --wait \
+        --command -- npx prisma migrate deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+  needs:
+    - build-client
+    - build-server
+    - container-scan-client
+    - container-scan-server
+
+# ─────────────────────────────────────────
+# STAGE: Deploy Staging
+# ─────────────────────────────────────────
+deploy-staging:
+  stage: deploy-staging
+  image: alpine/k8s:1.29.0
   environment:
     name: staging
-    url: https://staging.nexus-lms.example.com
-  needs:
-    - build:server
-    - build:client
+    url: https://staging.nexus-lms.com
+  script:
+    - aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_STAGING
+    - kubectl create namespace $KUBE_NAMESPACE_STAGING --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Apply secrets
+    - |
+      kubectl create secret generic nexus-secrets \
+        --namespace $KUBE_NAMESPACE_STAGING \
+        --from-literal=DATABASE_URL="$(aws secretsmanager get-secret-value --secret-id nexus-lms-staging/app-secrets --query SecretString --output text | jq -r .DATABASE_URL)" \
+        --from-literal=JWT_SECRET="$(aws secretsmanager get-secret-value --secret-id nexus-lms-staging/app-secrets --query SecretString --output text | jq -r .JWT_SECRET)" \
+        --from-literal=JWT_REFRESH_SECRET="$(aws secretsmanager get-secret-value --secret-id nexus-lms-staging/app-secrets --query SecretString --output text | jq -r .JWT_REFRESH_SECRET)" \
+        --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Deploy
+    - |
+      cd k8s/overlays/staging
+      kustomize edit set image \
+        nexus-client=$ECR_REGISTRY/$CLIENT_IMAGE:$CI_COMMIT_SHA \
+        nexus-server=$ECR_REGISTRY/$SERVER_IMAGE:$CI_COMMIT_SHA
+      kustomize build . | kubectl apply -f -
+    
+    - kubectl rollout status deployment/nexus-client-staging -n $KUBE_NAMESPACE_STAGING --timeout=300s
+    - kubectl rollout status deployment/nexus-server-staging -n $KUBE_NAMESPACE_STAGING --timeout=300s
+    
+    # Database migrations
+    - |
+      kubectl run prisma-migrate-$CI_PIPELINE_ID \
+        --namespace $KUBE_NAMESPACE_STAGING \
+        --image=$ECR_REGISTRY/$SERVER_IMAGE:$CI_COMMIT_SHA \
+        --restart=Never \
+        --rm \
+        --wait \
+        --command -- npx prisma migrate deploy
   rules:
-    - if: $CI_COMMIT_BRANCH == "develop"
-      when: on_success
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  needs:
+    - build-client
+    - build-server
+    - container-scan-client
+    - container-scan-server
 
-# ================================
+# ─────────────────────────────────────────
 # STAGE: Deploy Production
-# ================================
-deploy:production:
-  stage: deploy-production
-  image: alpine:latest
-  <<: *kubectl_setup
-  variables:
-    ENVIRONMENT: production
-    K8S_NAMESPACE: nexus-lms
-  script:
-    # Update image tags in manifests
-    - export IMAGE_TAG=${CI_COMMIT_SHA}
-    
-    # Apply Kubernetes manifests
-    - kubectl apply -f k8s/namespace.yaml
-    - kubectl apply -f k8s/configmap.yaml
-    - kubectl apply -f k8s/secrets.yaml -n ${K8S_NAMESPACE}
-    - kubectl apply -f k8s/rbac.yaml
-    
-    # Deploy with image substitution
-    - |
-      sed -e "s|\${AWS_ACCOUNT_ID}|${AWS_ACCOUNT_ID}|g" \
-          -e "s|\${AWS_REGION}|${AWS_REGION}|g" \
-          -e "s|:latest|:${IMAGE_TAG}|g" \
-          k8s/server-deployment.yaml | kubectl apply -f -
-    
-    - |
-      sed -e "s|\${AWS_ACCOUNT_ID}|${AWS_ACCOUNT_ID}|g" \
-          -e "s|\${AWS_REGION}|${AWS_REGION}|g" \
-          -e "s|:latest|:${IMAGE_TAG}|g" \
-          k8s/client-deployment.yaml | kubectl apply -f -
-    
-    - kubectl apply -f k8s/ingress.yaml
-    - kubectl apply -f k8s/network-policies.yaml
-    - kubectl apply -f k8s/pdb.yaml
-    
-    # Wait for rollout
-    - kubectl rollout status deployment/nexus-lms-server -n ${K8S_NAMESPACE} --timeout=300s
-    - kubectl rollout status deployment/nexus-lms-client -n ${K8S_NAMESPACE} --timeout=300s
-    
-    # Verify deployment
-    - kubectl get pods -n ${K8S_NAMESPACE}
+# ─────────────────────────────────────────
+deploy-prod:
+  stage: deploy-prod
+  image: alpine/k8s:1.29.0
   environment:
     name: production
-    url: https://nexus-lms.example.com
+    url: https://nexus-lms.com
+  script:
+    - aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_PROD
+    - kubectl create namespace $KUBE_NAMESPACE_PROD --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Apply secrets
+    - |
+      kubectl create secret generic nexus-secrets \
+        --namespace $KUBE_NAMESPACE_PROD \
+        --from-literal=DATABASE_URL="$(aws secretsmanager get-secret-value --secret-id nexus-lms-prod/app-secrets --query SecretString --output text | jq -r .DATABASE_URL)" \
+        --from-literal=JWT_SECRET="$(aws secretsmanager get-secret-value --secret-id nexus-lms-prod/app-secrets --query SecretString --output text | jq -r .JWT_SECRET)" \
+        --from-literal=JWT_REFRESH_SECRET="$(aws secretsmanager get-secret-value --secret-id nexus-lms-prod/app-secrets --query SecretString --output text | jq -r .JWT_REFRESH_SECRET)" \
+        --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Deploy with canary strategy
+    - |
+      cd k8s/overlays/production
+      kustomize edit set image \
+        nexus-client=$ECR_REGISTRY/$CLIENT_IMAGE:$CI_COMMIT_SHA \
+        nexus-server=$ECR_REGISTRY/$SERVER_IMAGE:$CI_COMMIT_SHA
+      kustomize build . | kubectl apply -f -
+    
+    - kubectl rollout status deployment/nexus-client-prod -n $KUBE_NAMESPACE_PROD --timeout=600s
+    - kubectl rollout status deployment/nexus-server-prod -n $KUBE_NAMESPACE_PROD --timeout=600s
+    
+    # Database migrations
+    - |
+      kubectl run prisma-migrate-$CI_PIPELINE_ID \
+        --namespace $KUBE_NAMESPACE_PROD \
+        --image=$ECR_REGISTRY/$SERVER_IMAGE:$CI_COMMIT_SHA \
+        --restart=Never \
+        --rm \
+        --wait \
+        --command -- npx prisma migrate deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
   needs:
-    - build:server
-    - build:client
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-      when: manual
-    - if: $CI_COMMIT_TAG
-      when: manual
+    - deploy-staging
 
-# ================================
+# ─────────────────────────────────────────
 # Rollback Job
-# ================================
-rollback:production:
-  stage: deploy-production
-  image: alpine:latest
-  <<: *kubectl_setup
+# ─────────────────────────────────────────
+rollback-prod:
+  stage: deploy-prod
+  image: alpine/k8s:1.29.0
   script:
-    - kubectl rollout undo deployment/nexus-lms-server -n ${K8S_NAMESPACE}
-    - kubectl rollout undo deployment/nexus-lms-client -n ${K8S_NAMESPACE}
-    - kubectl rollout status deployment/nexus-lms-server -n ${K8S_NAMESPACE} --timeout=300s
-    - kubectl rollout status deployment/nexus-lms-client -n ${K8S_NAMESPACE} --timeout=300s
-  environment:
-    name: production
-    action: stop
-  when: manual
+    - aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_PROD
+    - kubectl rollout undo deployment/nexus-client-prod -n $KUBE_NAMESPACE_PROD
+    - kubectl rollout undo deployment/nexus-server-prod -n $KUBE_NAMESPACE_PROD
+    - kubectl rollout status deployment/nexus-client-prod -n $KUBE_NAMESPACE_PROD --timeout=300s
+    - kubectl rollout status deployment/nexus-server-prod -n $KUBE_NAMESPACE_PROD --timeout=300s
   rules:
-    - if: $CI_COMMIT_BRANCH == "main"
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+  needs:
+    - deploy-prod
